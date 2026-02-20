@@ -1,14 +1,23 @@
-# YouTube Downloader + Upload Stub (Go)
+# Great Transport
 
-Minimal CLI to download from a YouTube channel or single video ID, then pass results to a stub uploader for China platforms.
+YouTube-to-Bilibili video transport system with LLM-powered discovery and ML ranking.
+
+## Architecture
+
+- **Go backend** — channel scanning, rule-based filtering, video download (yt-dlp), Bilibili upload (biliup), performance tracking
+- **Python ML service** — competitor monitoring, LLM-powered keyword discovery (Ollama), ML view prediction (LightGBM/GPBoost), auto-labeling pipeline
 
 ## Requirements
 - `yt-dlp` in `PATH`
 - `ffmpeg` recommended (improves format handling)
-- [`biliup` CLI](https://github.com/biliup/biliup) in `PATH` (only required for Bilibili uploads)
-  - Run `biliup --user-cookie cookies.json login` once to create upload credentials referenced by this tool.
+- [`biliup` CLI](https://github.com/biliup/biliup) in `PATH` for Bilibili uploads
+  - Run `biliup --user-cookie cookies.json login` once to create upload credentials
+- Python 3.11+ with dependencies in `ml-service/requirements.txt`
+- [Ollama](https://ollama.com/) running locally for LLM-powered discovery
 
 ## Usage
+
+### Go Backend
 ```bash
 go run . --video-id dQw4w9WgXcQ --platform bilibili
 go run . --channel-id UC_x5XG1OV2P6uZZ5FSM9Ttw --limit 3 --sleep-seconds 5
@@ -21,26 +30,34 @@ Options:
 - `--output` output directory (default: `downloads`)
 - `--limit` max videos for channel downloads (default: 5)
 - `--sleep-seconds` sleep between downloads to reduce rate (default: 5)
-- `--biliup-cookie`, `--biliup-line`, `--biliup-limit`, `--biliup-tags`, etc. expose uploader-level knobs; run `go run ./cmd/yttransfer --help` for details.
+- `--biliup-cookie`, `--biliup-line`, `--biliup-limit`, `--biliup-tags`, etc. for uploader knobs
+
+### ML Service
+```bash
+cd ml-service
+
+# Collect training data
+python collect.py --round 1
+
+# Run discovery pipeline (trending keywords → YouTube search → LLM scoring → ML ranking)
+python -m app.cli --db-path data.db discover
+
+# Train view prediction model
+python -m app.cli --db-path data.db train
+```
 
 ## Docker
 ```bash
-docker build -t yt-transfer .
-docker run --rm -v "$PWD/downloads:/app/downloads" yt-transfer \
+docker build -t great-transport .
+docker run --rm -v "$PWD/downloads:/app/downloads" great-transport \
   --channel-id UC_x5XG1OV2P6uZZ5FSM9Ttw --limit 3 --sleep-seconds 5
 ```
-To authenticate biliup inside the container, mount a cookie file and run the login command once:
+
+For biliup authentication inside the container:
 ```bash
-touch cookies.json  # create locally if it does not exist
+touch cookies.json
 docker run --rm -it \
   -v "$PWD/cookies.json:/app/cookies.json" \
-  --entrypoint biliup yt-transfer \
+  --entrypoint biliup great-transport \
   --user-cookie /app/cookies.json login
 ```
-The uploader reads `/app/cookies.json` by default, so keep mounting that file for later runs.
-You can automate the setup with `./scripts/docker-biliup-login.sh`, which prepares `cookies.json` and launches the login flow so you can finish SMS/QR verification manually.
-
-## Notes
-- Bilibili uploads execute the [`biliup`](https://github.com/biliup/biliup) CLI; install it and log in before running.
-- TikTok uploads are still stubbed and only log the file paths.
-- For channel downloads, the tool limits to the newest `--limit` videos.
